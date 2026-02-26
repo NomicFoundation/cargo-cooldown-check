@@ -250,13 +250,16 @@ fn ensure_lockfile(workspace: &Workspace) -> Result<()> {
 // fixtures.
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
     use crate::allowlist::{AllowExact, AllowPackage, AllowSection};
 
+    const EXAMPLE_MANIFEST: &str = "example/Cargo.toml";
     const SEVEN_DAYS_MINUTES: u64 = 10_080;
 
     fn local_package() -> Package {
-        let workspace = Workspace::load().unwrap();
+        let workspace = Workspace::load(Some(Path::new(EXAMPLE_MANIFEST))).unwrap();
         workspace
             .packages
             .values()
@@ -266,7 +269,7 @@ mod tests {
     }
 
     fn registry_package() -> Package {
-        let workspace = Workspace::load().unwrap();
+        let workspace = Workspace::load(Some(Path::new(EXAMPLE_MANIFEST))).unwrap();
         workspace
             .packages
             .values()
@@ -277,7 +280,7 @@ mod tests {
 
     #[test]
     fn gather_dependencies_requirements_only_includes_requested_crate_names() {
-        let workspace = Workspace::load().unwrap();
+        let workspace = Workspace::load(Some(Path::new(EXAMPLE_MANIFEST))).unwrap();
         let packages = &workspace.packages;
 
         let result =
@@ -309,7 +312,7 @@ mod tests {
 
     #[test]
     fn gather_dependencies_requirements_consolidates_from_multiple_dependents() {
-        let workspace = Workspace::load().unwrap();
+        let workspace = Workspace::load(Some(Path::new(EXAMPLE_MANIFEST))).unwrap();
 
         let dependencies_requirements =
             gather_dependencies_requirements(&HashSet::from(["tokio".to_string()]), &workspace);
@@ -331,8 +334,8 @@ mod tests {
             .iter()
             .map(std::string::ToString::to_string)
             .collect();
-        assert!(version_requirements.contains(&"^1".to_string()),);
-        assert!(version_requirements.contains(&"^1.21.2".to_string()),);
+        assert!(version_requirements.contains(&"^1.40".to_string()),);
+        assert!(version_requirements.contains(&"^1.44".to_string()),);
     }
 
     #[test]

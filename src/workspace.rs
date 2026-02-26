@@ -1,4 +1,7 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 use cargo_metadata::{Metadata, Node, Package, PackageId, camino::Utf8PathBuf};
@@ -18,13 +21,14 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    pub fn load() -> anyhow::Result<Self> {
+    pub fn load(manifest_path: Option<&Path>) -> anyhow::Result<Self> {
         let features = {
             let mut features = Features::default();
             features.all_features = true;
             features
         };
-        let manifest = Manifest::default();
+        let mut manifest = Manifest::default();
+        manifest.manifest_path = manifest_path.map(Path::to_path_buf);
         let metadata = read_metadata(&manifest, &features)?;
         let config_file_path =
             cargo_config_file_path(&metadata.workspace_root, COOLDOWN_FILE_CONFIG);

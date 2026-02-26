@@ -65,6 +65,6 @@ async fn check_dependencies(verbose: bool) -> anyhow::Result<()> {
     init_logger(verbose)?;
     log::info!("Running cargo cooldown check");
 
-    let workspace = Workspace::load()?;
+    let workspace = Workspace::load(None)?;
     run_check_flow(workspace).await
 }
