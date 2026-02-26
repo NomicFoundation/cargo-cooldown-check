@@ -23,9 +23,29 @@ Broad requirements remain the right default — tighter constraints do not preve
 - Automatically update `Cargo.lock` with older dependencies
 - Create `Cargo.lock` if it is not present
 
+## Installation
+
+### Local
+
+```sh
+cargo install --git https://github.com/NomicFoundation/cargo-cooldown-check
+```
+
+### GitHub Actions
+
+Add the following step to your workflow:
+
+```yaml
+- uses: NomicFoundation/cargo-cooldown-check@v0.1.0  # or pin to a commit SHA
+  # with:
+  #   verbose: "true"  # optional
+```
+
+The action reads configuration from `.cargo/cooldown.toml` and `.cargo/cooldown-allowlist.toml` in your repository, so make sure to commit these files.
+
 ## Usage
 
-### Running the tool
+### Running the tool locally
 
 ```sh
 # Run from the workspace root
