@@ -95,6 +95,5 @@ Candidate versions will:
 
 ## TODO
 
-- Extract into its own repo
-  - expose it as a `cargo-` bin crate so it can be executed as a cargo tool
-  - CliArgs parsing will have to change to adapt to this (when Cargo invokes `cargo cooldown-check`, it passes `"cooldown-check"` as the first CLI argument.)
+- Identify if the violating crate is a direct or transitive dependency.
+  - If it's a transitive dependency suggest the user how to identify which crate is pulling it in.
