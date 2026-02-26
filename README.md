@@ -32,7 +32,7 @@ Broad requirements remain the right default — tighter constraints do not preve
 cargo cooldown-check
 
 # Verbose output
-cargo cooldown-check -- -v
+cargo cooldown-check -v
 ```
 
 ### Configuration
