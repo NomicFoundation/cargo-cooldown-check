@@ -37,7 +37,7 @@ impl RegistryClient {
     pub fn new(config: &Config) -> Result<Self> {
         let http = Client::builder()
             .timeout(Duration::from_secs(10))
-            .user_agent("edr_cooldown_check")
+            .user_agent("cargo_cooldown_check")
             .build()?;
         let base = Url::parse(&config.registry_api).context("invalid registry API URL")?;
         Ok(Self {
