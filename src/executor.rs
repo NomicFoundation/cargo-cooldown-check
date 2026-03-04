@@ -18,9 +18,12 @@ const MAX_CONCURRENT_FETCHES: usize = 10;
 pub async fn run_check_flow(workspace: Workspace) -> Result<()> {
     ensure_lockfile(&workspace)?;
 
-    let allowlist = &workspace.allowlist;
-    let config = &workspace.config;
-    let packages = &workspace.packages;
+    let Workspace {
+        allowlist,
+        config,
+        packages,
+        ..
+    } = &workspace;
 
     if config.cooldown_minutes == 0 {
         log::info!("Skipping cooldown check: cooldown minutes is set to 0");
@@ -61,16 +64,14 @@ fn cooldown_requirement<'a>(
     config: &Config,
     allowlist: &Allowlist,
 ) -> Option<(&'a Package, u64)> {
-    if package.source.is_none() {
+    let Some(source) = package.source.as_ref() else {
         log::debug!(
             "Skipping validation for crate {}@{}: crate is a local dependency",
             package.name,
             package.version
         );
         return None;
-    }
-
-    let source = package.source.as_ref().expect("Source should be present");
+    };
     if !config.is_registry_allowed(&source.repr) {
         log::warn!(
             "Skipping non-allowed registry dependency. crate = {}, source = {}",

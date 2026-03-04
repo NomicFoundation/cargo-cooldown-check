@@ -93,7 +93,7 @@ When a dependency fails the check, one of two things happens:
 
 Candidate versions will:
 
-- Not be yanked
+- Not have been yanked
 - Satisfy all observed semver requirements (across every dependent in the graph)
 - Be older than the current lockfile entry
 - Have been published before the cooldown cutoff
