@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -35,7 +35,7 @@ pub struct AllowPackage {
 impl Allowlist {
     pub fn load(file_path: &Path) -> Result<Self> {
         if !file_path.exists() {
-            return Ok(Self::default());
+            bail!("Allowlist path does not exist: {:?}", file_path.display());
         }
 
         let contents = fs::read_to_string(file_path)
@@ -88,7 +88,11 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         writeln!(
             file,
-            "[[allow.exact]]\ncrate = \"foo\"\nversion = \"1.2.3\""
+            r#"
+[[allow.exact]]
+crate = "foo"
+version = "1.2.3"
+"#
         )
         .unwrap();
 

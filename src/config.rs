@@ -113,7 +113,11 @@ mod tests {
             let mut file = NamedTempFile::new().unwrap();
             writeln!(
                 file,
-                "cooldown_minutes = 60\ncache_dir = \"/tmp/my-cache\"\ncache_ttl_seconds = 3600"
+                r#"
+cooldown_minutes = 60
+cache_dir = "/tmp/my-cache"
+cache_ttl_seconds = 3600
+                "#
             )
             .unwrap();
 
@@ -129,9 +133,10 @@ mod tests {
             writeln!(file, "cooldown_minutes = 120").unwrap();
 
             let config = Config::load(file.path()).unwrap();
+            let default_config = Config::default();
             assert_eq!(config.cooldown_minutes, 120);
-            assert_eq!(config.cache_dir, None);
-            assert_eq!(config.cache_ttl_seconds, 86_400);
+            assert_eq!(config.cache_dir, default_config.cache_dir);
+            assert_eq!(config.cache_ttl_seconds, default_config.cache_ttl_seconds);
         }
     }
 }

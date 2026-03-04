@@ -1,4 +1,4 @@
-use std::{sync::LazyLock, time::Duration};
+use std::time::Duration;
 
 use anyhow::Context;
 use chrono::{DateTime, Utc};
@@ -11,20 +11,12 @@ use crate::{
     types::CooldownFailure,
 };
 
-/// A single reference point in time for all cooldown comparisons,
-/// ensuring consistency across the entire check.
-static NOW: LazyLock<DateTime<Utc>> = LazyLock::new(Utc::now);
-
-fn age_minutes(meta: &VersionMeta) -> u64 {
-    (*NOW - meta.created_at)
-        .num_minutes()
-        .try_into()
-        .unwrap_or(0)
-}
-
 pub struct Resolver {
     client: RegistryClient,
     cache: Cache,
+    /// A single reference point in time for all cooldown comparisons,
+    /// ensuring consistency across the entire check.
+    reference_time: DateTime<Utc>,
 }
 
 impl Resolver {
@@ -35,8 +27,11 @@ impl Resolver {
             Cache::new(Duration::from_secs(config.cache_ttl_seconds))?
         };
         let client = RegistryClient::new(config)?;
-
-        Ok(Self { client, cache })
+        Ok(Self {
+            client,
+            cache,
+            reference_time: Utc::now(),
+        })
     }
 
     pub async fn find_version_candidates(
@@ -50,13 +45,14 @@ impl Resolver {
                 cooldown_failure.name, cooldown_failure.current_version
             ))?;
         let candidate_list = self.fetch_version_list(&cooldown_failure.name).await?;
-        let cutoff =
-            *NOW - chrono::Duration::minutes(cooldown_failure.age_threshold_minutes as i64);
+        let cutoff = self.reference_time
+            - chrono::Duration::minutes(cooldown_failure.age_threshold_minutes as i64);
 
         let versions = candidate_list
             .into_iter()
             .filter(|meta| !meta.yanked)
             .filter(|meta| meta.created_at <= cutoff)
+            // Silently skip unparseable versions - at worst we omit a candidate from the downgrade suggestions.
             .filter_map(|meta| Version::parse(&meta.num).ok())
             .filter(|version| {
                 *version < current_version && satisfies_requirements(version, requirements)
@@ -69,11 +65,11 @@ impl Resolver {
     pub async fn fetch_version_age(&self, name: &str, version: &str) -> anyhow::Result<u64> {
         let key = format!("{name}/{version}");
         if let Some(meta) = self.cache.get::<VersionMeta>(&key)? {
-            return Ok(age_minutes(&meta));
+            return Ok(self.age_minutes(&meta));
         }
         let meta = self.client.fetch_version(name, version).await?;
         self.cache.put(&key, &meta)?;
-        Ok(age_minutes(&meta))
+        Ok(self.age_minutes(&meta))
     }
 
     async fn fetch_version_list(&self, name: &str) -> anyhow::Result<Vec<VersionMeta>> {
@@ -85,6 +81,13 @@ impl Resolver {
         versions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         self.cache.put(&key, &versions)?;
         Ok(versions)
+    }
+
+    fn age_minutes(&self, meta: &VersionMeta) -> u64 {
+        (self.reference_time - meta.created_at)
+            .num_minutes()
+            .try_into()
+            .unwrap_or(0)
     }
 }
 
@@ -171,9 +174,11 @@ mod tests {
             cache_dir: Some(dir.path().to_path_buf()),
             ..Config::default()
         };
+
         let resolver = Resolver::new(&config).unwrap();
         let expected_age = 10_080u64; // 7 days
-        let created_at = *NOW - chrono::Duration::minutes(expected_age.try_into().unwrap());
+        let created_at =
+            resolver.reference_time - chrono::Duration::minutes(expected_age.try_into().unwrap());
         let meta = VersionMeta {
             num: "1.43.0".into(),
             created_at,

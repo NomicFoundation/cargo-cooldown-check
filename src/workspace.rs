@@ -35,7 +35,8 @@ impl Workspace {
         let config = Config::load(&config_file_path)?;
         let allowlist_file_path =
             cargo_config_file_path(&metadata.workspace_root, ALLOWLIST_FILE_CONFIG);
-        let allowlist = Allowlist::load(&allowlist_file_path)?;
+        let allowlist =
+            Allowlist::load(&allowlist_file_path).unwrap_or_else(|_| Allowlist::default());
 
         let nodes = metadata
             .resolve
