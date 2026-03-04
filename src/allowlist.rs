@@ -35,7 +35,7 @@ pub struct AllowPackage {
 impl Allowlist {
     pub fn load(file_path: &Path) -> Result<Self> {
         if !file_path.exists() {
-            bail!("Allowlist path does not exist: {:?}", file_path.display());
+            bail!("Allowlist path does not exist: {}", file_path.display());
         }
 
         let contents = fs::read_to_string(file_path)
@@ -101,6 +101,16 @@ version = "1.2.3"
         assert!(!allowlist.is_exact_allowed("foo", "1.2.4"));
 
         assert_eq!(allowlist.crate_minutes("foo"), None);
+    }
+
+    #[test]
+    fn load_fails_for_nonexistent_path() {
+        let path = Path::new("/tmp/does_not_exist.toml");
+        let err = Allowlist::load(path).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Allowlist path does not exist: /tmp/does_not_exist.toml"
+        );
     }
 
     #[test]
