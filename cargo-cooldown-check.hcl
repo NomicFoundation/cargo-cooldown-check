@@ -23,3 +23,7 @@ platform "darwin-amd64" {
 platform "darwin-arm64" {
   source = "https://github.com/NomicFoundation/cargo-cooldown-check/releases/download/v${version}/cargo-cooldown-check-v${version}-aarch64-apple-darwin.tar.gz"
 }
+
+platform "windows-amd64" {
+  source = "https://github.com/NomicFoundation/cargo-cooldown-check/releases/download/v${version}/cargo-cooldown-check-v${version}-x86_64-pc-windows-msvc.tar.gz"
+}
