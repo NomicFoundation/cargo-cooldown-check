@@ -23,6 +23,8 @@ jobs:
             os: "macos-latest"
           - target: "aarch64-apple-darwin"
             os: "macos-latest"
+          - target: "x86_64-pc-windows-msvc"
+            os: "windows-latest"
     runs-on: "${{ matrix.os }}"
     steps:
       - name: "Checkout"
@@ -47,9 +49,12 @@ jobs:
           version=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')
           echo "version=v${version}" >> "$GITHUB_OUTPUT"
       - name: "Package binary"
+        shell: "bash"
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../cargo-cooldown-check-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz cargo-cooldown-check
+          bin="cargo-cooldown-check"
+          [ -f "${bin}.exe" ] && bin="${bin}.exe"
+          tar czf ../../../cargo-cooldown-check-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz "$bin"
       - name: "Upload artifact"
         uses: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" # v4
         with:
@@ -66,11 +71,11 @@ jobs:
           merge-multiple: true
       - name: "Verify artifacts"
         run: |
-          echo "Expected 4 tarballs:"
+          echo "Expected 5 tarballs:"
           ls -la *.tar.gz
           count=$(ls *.tar.gz | wc -l)
-          if [ "$count" -ne 4 ]; then
-            echo "::error::Expected 4 artifacts, found $count"
+          if [ "$count" -ne 5 ]; then
+            echo "::error::Expected 5 artifacts, found $count"
             exit 1
           fi
           for f in *.tar.gz; do
