@@ -3,6 +3,7 @@ name: "Release"
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch: {}
 
 permissions:
   contents: "write"
@@ -26,7 +27,8 @@ jobs:
         uses: "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683" # v4.2.2
         with:
           persist-credentials: false
-      - uses: "actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c" # v1.15.2
+      - name: "Setup Rust"
+        uses: "actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c" # v1.15.2
         with:
           target: "${{ matrix.target }}"
       - name: "Install cross-compilation tools"
@@ -37,18 +39,46 @@ jobs:
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
       - name: "Build"
         run: "cargo build --release --locked --target ${{ matrix.target }}"
+      - name: "Get version"
+        id: "version"
+        run: |
+          version=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')
+          echo "version=v${version}" >> "$GITHUB_OUTPUT"
       - name: "Package binary"
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../cargo-cooldown-check-${{ github.ref_name }}-${{ matrix.target }}.tar.gz cargo-cooldown-check
+          tar czf ../../../cargo-cooldown-check-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz cargo-cooldown-check
       - name: "Upload artifact"
         uses: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" # v4
         with:
           name: "cargo-cooldown-check-${{ matrix.target }}"
           path: "*.tar.gz"
 
-  release:
+  review:
     needs: "build"
+    runs-on: "ubuntu-24.04"
+    steps:
+      - name: "Download artifacts"
+        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093" # v4
+        with:
+          merge-multiple: true
+      - name: "Verify artifacts"
+        run: |
+          echo "Expected 4 tarballs:"
+          ls -la *.tar.gz
+          count=$(ls *.tar.gz | wc -l)
+          if [ "$count" -ne 4 ]; then
+            echo "::error::Expected 4 artifacts, found $count"
+            exit 1
+          fi
+          for f in *.tar.gz; do
+            echo "--- $f ---"
+            tar tzf "$f"
+          done
+
+  release:
+    if: "startsWith(github.ref, 'refs/tags/v')"
+    needs: "review"
     runs-on: "ubuntu-24.04"
     steps:
       - name: "Download artifacts"
