@@ -94,10 +94,10 @@ jobs:
           done
 
   publish:
-    # TODO: restore guard after test: if: "github.ref == 'refs/heads/main'"
+    if: "github.ref == 'refs/heads/main'"
     needs: "review"
     runs-on: "ubuntu-24.04"
-    # TODO: restore after test: environment: "release"
+    environment: "release"
     permissions:
       contents: "write"
     steps:
