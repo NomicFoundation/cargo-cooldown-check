@@ -135,7 +135,7 @@ name = "cargo-cooldown-check"
 version = "0.1.2"
 dependencies = [
  "anyhow",
- "cargo_metadata",
+ "cargo_metadata 0.23.1",
  "chrono",
  "clap",
  "clap-cargo",
@@ -185,6 +185,20 @@ dependencies = [
  "camino",
  "cargo-platform",
  "cargo-util-schemas",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "cargo_metadata"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef987d17b0a113becdd19d3d0022d04d7ef41f9efe4f3fb63ac44ba61df3ade9"
+dependencies = [
+ "camino",
+ "cargo-platform",
  "semver",
  "serde",
  "serde_json",
@@ -242,7 +256,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce5010f1505303ab5e680a48db64856a03161d8781e9eb1a6e553dc78f7e6b38"
 dependencies = [
  "anstyle",
- "cargo_metadata",
+ "cargo_metadata 0.22.0",
  "clap",
  "serde",
  "serde_json",

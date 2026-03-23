@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = { version = "1.0.102", default-features = false }
-cargo_metadata = "0.22"
+cargo_metadata = "0.23"
 clap = { version = "4", features = ["derive"] }
 clap-cargo = { version = "0.17", features = ["cargo_metadata"] }
 log = { version = "0.4.17", default-features = false }
