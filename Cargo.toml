@@ -19,7 +19,7 @@ semver = { version = "1.0.26", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-tempfile = "3.10"
+tempfile = "3.27"
 
 [lints.rust]
 future_incompatible = "warn"
