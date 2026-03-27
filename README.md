@@ -36,7 +36,7 @@ cargo install --git https://github.com/NomicFoundation/cargo-cooldown-check
 Add the following step to your workflow:
 
 ```yaml
-- uses: NomicFoundation/cargo-cooldown-check@v0.1.0  # or pin to a commit SHA
+- uses: NomicFoundation/cargo-cooldown-check@v0.1.2  # or pin to a commit SHA
   # with:
   #   verbose: "true"  # optional
 ```
@@ -112,6 +112,10 @@ Candidate versions will:
 ## References
 
 - [Cargo resolver — SemVer-breaking patch releases](https://doc.rust-lang.org/cargo/reference/resolver.html#semver-breaking-patch-release-breaks-the-build)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the release workflow and how to publish new versions.
 
 ## TODO
 
