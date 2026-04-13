@@ -11,7 +11,7 @@ clap-cargo = { version = "0.18", features = ["cargo_metadata"] }
 log = { version = "0.4.17", default-features = false }
 serde = { version = "1.0", features = ["derive", "std"] }
 serde_json = { version = "1.0", features = ["arbitrary_precision", "preserve_order", "std"] }
-toml = { version = "1.0", features = ["preserve_order"] }
+toml = { version = "1.1", features = ["preserve_order"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "rustls-tls"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
