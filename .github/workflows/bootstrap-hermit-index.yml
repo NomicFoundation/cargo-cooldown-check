@@ -20,7 +20,7 @@ jobs:
         run: |
           versions=$(gh release list --repo "${{ github.repository }}" \
             --limit 100 --exclude-pre-releases \
-            --json tagName --jq '[.[].tagName | ltrimstr("v")] | sort')
+            --json tagName --jq '[.[].tagName | select(startswith("v")) | ltrimstr("v")] | sort')
 
           jq -n \
             --argjson versions "$versions" \
