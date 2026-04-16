@@ -132,3 +132,25 @@ jobs:
           tag_name: "${{ steps.version.outputs.tag }}"
           files: "*.tar.gz"
           generate_release_notes: true
+      - name: "Update hermit search index"
+        if: "steps.version.outputs.new == 'true'"
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          # Regenerate the hermit search index so Renovate (and other
+          # consumers using this repo as a custom hermit source) can
+          # discover available versions.
+          versions=$(gh release list --limit 100 --exclude-pre-releases \
+            --json tagName --jq '[.[].tagName | ltrimstr("v")] | sort')
+
+          printf '[{"Name":"cargo-cooldown-check","Versions":%s}]\n' \
+            "$versions" > index.json
+
+          echo "Generated index.json:"
+          cat index.json
+
+          gh release delete index --yes 2>/dev/null || true
+          gh release create index index.json \
+            --title "Hermit Package Index" \
+            --notes "Auto-generated hermit search index for Renovate. Do not delete." \
+            --latest=false
