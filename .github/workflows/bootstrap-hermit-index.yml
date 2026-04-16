@@ -1,0 +1,50 @@
+name: "Bootstrap Hermit Index"
+
+# Temporary workflow to regenerate the hermit search index with
+# semver sorting and CurrentVersion. Delete this file after the
+# index release is updated.
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  bootstrap-index:
+    runs-on: "ubuntu-24.04"
+    permissions:
+      contents: "write"
+    steps:
+      - name: "Generate and publish index"
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          versions=$(gh api --paginate "repos/${{ github.repository }}/releases" \
+            --jq '[.[] | select(.prerelease | not) | select(.draft | not) | .tag_name | select(startswith("v")) | ltrimstr("v")] | sort_by(split(".") | map(tonumber))')
+
+          current=$(echo "$versions" | jq -r '.[-1]')
+
+          jq -n \
+            --argjson versions "$versions" \
+            --arg current "$current" \
+            '[{
+              Name: "cargo-cooldown-check",
+              Versions: $versions,
+              Channels: ["@latest"],
+              CurrentVersion: $current,
+              Description: "Checks that all Cargo dependencies have been published for a minimum cooldown period",
+              Repository: "https://github.com/NomicFoundation/cargo-cooldown-check"
+            }]' > index.json
+
+          echo "Generated index.json:"
+          cat index.json
+
+          if ! gh release view index --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            gh release create index \
+              --repo "${{ github.repository }}" \
+              --title "Hermit Package Index" \
+              --notes "Auto-generated hermit search index for Renovate. Do not delete." \
+              --latest=false
+          fi
+
+          gh release upload index index.json --repo "${{ github.repository }}" --clobber
