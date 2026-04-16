@@ -141,17 +141,20 @@ jobs:
           # consumers using this repo as a custom hermit source) can
           # discover available versions.
           versions=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
-            --jq '[.[] | select(.prerelease | not) | select(.draft | not) | .tag_name | select(startswith("v")) | ltrimstr("v")] | sort')
+            --jq '[.[] | select(.prerelease | not) | select(.draft | not) | .tag_name | select(startswith("v")) | ltrimstr("v")] | sort_by(split(".") | map(tonumber))')
 
           # Format must match `hermit search --json` output (same schema
           # as cashapp/hermit-packages index release).
+          current=$(echo "$versions" | jq -r '.[-1]')
+
           jq -n \
             --argjson versions "$versions" \
+            --arg current "$current" \
             '[{
               Name: "cargo-cooldown-check",
               Versions: $versions,
               Channels: ["@latest"],
-              CurrentVersion: "",
+              CurrentVersion: $current,
               Description: "Checks that all Cargo dependencies have been published for a minimum cooldown period",
               Repository: "https://github.com/NomicFoundation/cargo-cooldown-check"
             }]' > index.json
