@@ -141,7 +141,7 @@ jobs:
           # consumers using this repo as a custom hermit source) can
           # discover available versions.
           versions=$(gh release list --limit 100 --exclude-pre-releases \
-            --json tagName --jq '[.[].tagName | ltrimstr("v")] | sort')
+            --json tagName --jq '[.[].tagName | select(startswith("v")) | ltrimstr("v")] | sort')
 
           # Format must match `hermit search --json` output (same schema
           # as cashapp/hermit-packages index release).
