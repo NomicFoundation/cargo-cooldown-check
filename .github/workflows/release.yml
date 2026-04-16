@@ -140,8 +140,8 @@ jobs:
           # Regenerate the hermit search index so Renovate (and other
           # consumers using this repo as a custom hermit source) can
           # discover available versions.
-          versions=$(gh release list --limit 100 --exclude-pre-releases \
-            --json tagName --jq '[.[].tagName | select(startswith("v")) | ltrimstr("v")] | sort')
+          versions=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq '[.[] | select(.prerelease | not) | select(.draft | not) | .tag_name | select(startswith("v")) | ltrimstr("v")] | sort')
 
           # Format must match `hermit search --json` output (same schema
           # as cashapp/hermit-packages index release).
@@ -159,8 +159,14 @@ jobs:
           echo "Generated index.json:"
           cat index.json
 
-          gh release delete index --yes 2>/dev/null || true
-          gh release create index index.json \
-            --title "Hermit Package Index" \
-            --notes "Auto-generated hermit search index for Renovate. Do not delete." \
-            --latest=false
+          # Create the index release if it doesn't exist yet, then
+          # replace the asset in-place to avoid a window where the
+          # release is missing.
+          if ! gh release view index > /dev/null 2>&1; then
+            gh release create index \
+              --title "Hermit Package Index" \
+              --notes "Auto-generated hermit search index for Renovate. Do not delete." \
+              --latest=false
+          fi
+
+          gh release upload index index.json --clobber
