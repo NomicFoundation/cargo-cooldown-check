@@ -1,0 +1,36 @@
+name: "Bootstrap Hermit Index"
+
+# Temporary workflow to create the initial hermit search index.
+# Delete this file after the index release exists.
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  bootstrap-index:
+    runs-on: "ubuntu-24.04"
+    permissions:
+      contents: "write"
+    steps:
+      - name: "Generate and publish index"
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          versions=$(gh release list --repo "${{ github.repository }}" \
+            --limit 100 --exclude-pre-releases \
+            --json tagName --jq '[.[].tagName | ltrimstr("v")] | sort')
+
+          printf '[{"Name":"cargo-cooldown-check","Versions":%s}]\n' \
+            "$versions" > index.json
+
+          echo "Generated index.json:"
+          cat index.json
+
+          gh release delete index --repo "${{ github.repository }}" --yes 2>/dev/null || true
+          gh release create index index.json \
+            --repo "${{ github.repository }}" \
+            --title "Hermit Package Index" \
+            --notes "Auto-generated hermit search index for Renovate. Do not delete." \
+            --latest=false
