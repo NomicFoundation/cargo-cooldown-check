@@ -25,6 +25,8 @@ The binary and the GitHub Action share a single version in `Cargo.toml`. Bumping
 
 The workflow automatically creates a git tag and GitHub release with platform tarballs. If the version in `Cargo.toml` matches an existing tag, the publish job is skipped.
 
+Each publish also regenerates the `index` release (a hermit search index consumed by Renovate — see the Hermit / Renovate section in the README). Do not delete this release; it is reused across versions and updated in place.
+
 ### Dry-run a release
 
 Add the `ci:release` label to a PR. This triggers the full build matrix and artifact review without publishing.

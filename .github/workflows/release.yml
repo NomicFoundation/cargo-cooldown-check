@@ -132,3 +132,44 @@ jobs:
           tag_name: "${{ steps.version.outputs.tag }}"
           files: "*.tar.gz"
           generate_release_notes: true
+      - name: "Update hermit search index"
+        if: "steps.version.outputs.new == 'true'"
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          # Regenerate the hermit search index so Renovate (and other
+          # consumers using this repo as a custom hermit source) can
+          # discover available versions.
+          versions=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq '[.[] | select(.prerelease | not) | select(.draft | not) | .tag_name | select(startswith("v")) | ltrimstr("v")] | sort_by(split(".") | map(tonumber))')
+
+          # Format must match `hermit search --json` output (same schema
+          # as cashapp/hermit-packages index release).
+          current=$(echo "$versions" | jq -r '.[-1]')
+
+          jq -n \
+            --argjson versions "$versions" \
+            --arg current "$current" \
+            '[{
+              Name: "cargo-cooldown-check",
+              Versions: $versions,
+              Channels: ["@latest"],
+              CurrentVersion: $current,
+              Description: "Checks that all Cargo dependencies have been published for a minimum cooldown period",
+              Repository: "https://github.com/NomicFoundation/cargo-cooldown-check"
+            }]' > index.json
+
+          echo "Generated index.json:"
+          cat index.json
+
+          # Create the index release if it doesn't exist yet, then
+          # replace the asset in-place to avoid a window where the
+          # release is missing.
+          if ! gh release view index > /dev/null 2>&1; then
+            gh release create index \
+              --title "Hermit Package Index" \
+              --notes "Auto-generated hermit search index for Renovate. Do not delete." \
+              --latest=false
+          fi
+
+          gh release upload index index.json --clobber
