@@ -43,6 +43,22 @@ Add the following step to your workflow:
 
 The action reads configuration from `.cargo/cooldown.toml` and `.cargo/cooldown-allowlist.toml` in your repository, so make sure to commit these files.
 
+### Hermit / Renovate
+
+Each release publishes a [hermit](https://cashapp.github.io/hermit/) search index as the `index` release asset, so this repository can be used as a custom hermit source. To let [Renovate](https://docs.renovatebot.com/modules/datasource/hermit/) automatically open update PRs for the pinned hermit package, add a `packageRules` entry in `renovate.json` that points the `hermit` manager at this repo for the `cargo-cooldown-check` package:
+
+```json
+{
+  "packageRules": [
+    {
+      "matchManagers": ["hermit"],
+      "matchPackageNames": ["cargo-cooldown-check"],
+      "registryUrls": ["https://github.com/NomicFoundation/cargo-cooldown-check"]
+    }
+  ]
+}
+```
+
 ## Usage
 
 ### Running the tool locally
