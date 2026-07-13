@@ -71,17 +71,16 @@ impl RegistryClient {
     /// was published — and a wrongly suggested version fails loudly in
     /// `cargo update`.
     pub async fn list_versions(&self, name: &str) -> Result<Vec<VersionMeta>> {
-        let krate = match self.local_krate(name) {
-            Some(krate) => krate,
-            None => self.fetch_krate(name).await?,
-        };
-        // Silently skip versions without a valid pubtime - at worst we omit a
-        // candidate from the downgrade suggestions.
-        Ok(krate
-            .versions
-            .iter()
-            .filter_map(|indexed| version_meta(indexed).ok())
-            .collect())
+        // A local file predating crates.io's `pubtime` backfill yields no
+        // usable versions; the remote copy is timestamped.
+        if let Some(krate) = self.local_krate(name) {
+            let versions = version_metas(&krate);
+            if !versions.is_empty() {
+                return Ok(versions);
+            }
+        }
+        let krate = self.fetch_krate(name).await?;
+        Ok(version_metas(&krate))
     }
 
     fn local_krate(&self, name: &str) -> Option<IndexKrate> {
@@ -116,6 +115,16 @@ impl RegistryClient {
             sleep(RETRY_DELAY).await;
         }
     }
+}
+
+// Silently skip versions without a valid pubtime - at worst we omit a
+// candidate from the downgrade suggestions.
+fn version_metas(krate: &IndexKrate) -> Vec<VersionMeta> {
+    krate
+        .versions
+        .iter()
+        .filter_map(|indexed| version_meta(indexed).ok())
+        .collect()
 }
 
 fn find_version<'krate>(krate: &'krate IndexKrate, version: &str) -> Option<&'krate IndexVersion> {
