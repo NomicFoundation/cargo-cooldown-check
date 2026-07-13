@@ -69,7 +69,7 @@ impl Default for Config {
             cache_ttl_seconds: 86_400, // 1 day
             allowed_registries: default_allowed_registries(),
             cache_dir: None,
-            http_retries: 2,
+            http_retries: 5,
             registry_api: "https://crates.io/api/v1/".to_string(),
         }
     }

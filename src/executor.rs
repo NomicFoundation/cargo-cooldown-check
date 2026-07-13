@@ -13,7 +13,9 @@ use crate::{
     workspace::Workspace,
 };
 
-const MAX_CONCURRENT_FETCHES: usize = 10;
+// crates.io's data-access API budgets roughly one request per second; keep the
+// concurrent fan-out low so we don't provoke the 429s the backoff then absorbs.
+const MAX_CONCURRENT_FETCHES: usize = 4;
 
 pub async fn run_check_flow(workspace: Workspace) -> Result<()> {
     ensure_lockfile(&workspace)?;
