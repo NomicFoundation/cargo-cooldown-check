@@ -1,12 +1,16 @@
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use reqwest::{
     Client, StatusCode, Url,
     header::{HeaderMap, RETRY_AFTER},
 };
 use serde::{Deserialize, Serialize};
+use tame_index::{
+    IndexKrate, IndexVersion, KrateName,
+    index::{FileLock, IndexLocation, IndexUrl, SparseIndex},
+};
 use tokio::time::sleep;
 
 use crate::config::Config;
@@ -25,20 +29,14 @@ pub struct VersionMeta {
     pub num: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct VersionResponse {
-    version: VersionMeta,
-}
-
-#[derive(Debug, Deserialize)]
-struct CrateResponse {
-    versions: Vec<VersionMeta>,
-}
-
-#[derive(Clone)]
+/// Publication metadata source: the crates.io sparse index, whose entries
+/// carry a `pubtime` field. Reads cargo's own on-disk index cache first and
+/// falls back to `index.crates.io` — the CDN host cargo bulk-fetches from,
+/// which unlike the `crates.io/api` host has no request-rate budget.
 pub struct RegistryClient {
     http: Client,
-    base: Url,
+    index: SparseIndex,
+    lock: FileLock,
     retries: u32,
 }
 
@@ -46,17 +44,70 @@ impl RegistryClient {
     pub fn new(config: &Config) -> Result<Self> {
         let http = Client::builder()
             .timeout(Duration::from_secs(10))
-            .user_agent("cargo_cooldown_check")
+            .user_agent(
+                "cargo-cooldown-check (https://github.com/NomicFoundation/cargo-cooldown-check)",
+            )
             .build()?;
-        let base = Url::parse(&config.registry_api).context("invalid registry API URL")?;
+        let index = SparseIndex::new(IndexLocation::new(IndexUrl::CratesIoSparse))
+            .context("failed to locate the crates.io sparse index")?;
         Ok(Self {
             http,
-            base,
+            index,
+            lock: FileLock::unlocked(),
             retries: config.http_retries,
         })
     }
 
-    async fn get_json<T: for<'de> Deserialize<'de>>(&self, url: Url) -> Result<T> {
+    pub async fn fetch_version(&self, name: &str, version: &str) -> Result<VersionMeta> {
+        if let Some(meta) = self.cached_version(name, version) {
+            return Ok(meta);
+        }
+        let krate = self.fetch_krate(name).await?;
+        let indexed = krate
+            .versions
+            .iter()
+            .find(|indexed| indexed.version.as_str() == version)
+            .with_context(|| format!("{name}@{version} not found in the crates.io index"))?;
+        version_meta(indexed)
+    }
+
+    /// Lists a crate's versions, always from the remote index: unlike publish
+    /// times, `yanked` flags are mutable, and this only runs for the few
+    /// crates that already failed the check.
+    pub async fn list_versions(&self, name: &str) -> Result<Vec<VersionMeta>> {
+        let krate = self.fetch_krate(name).await?;
+        // Silently skip versions without a valid pubtime - at worst we omit a
+        // candidate from the downgrade suggestions.
+        Ok(krate
+            .versions
+            .iter()
+            .filter_map(|indexed| version_meta(indexed).ok())
+            .collect())
+    }
+
+    /// Looks the version up in cargo's local index cache, avoiding network
+    /// I/O. Entries cached before crates.io backfilled `pubtime` lack the
+    /// timestamp; returning `None` falls through to a remote fetch.
+    fn cached_version(&self, name: &str, version: &str) -> Option<VersionMeta> {
+        let krate_name = KrateName::crates_io(name).ok()?;
+        let krate = self.index.cached_krate(krate_name, &self.lock).ok()??;
+        let indexed = krate
+            .versions
+            .iter()
+            .find(|indexed| indexed.version.as_str() == version)?;
+        version_meta(indexed).ok()
+    }
+
+    async fn fetch_krate(&self, name: &str) -> Result<IndexKrate> {
+        let krate_name = KrateName::crates_io(name)?;
+        let url = Url::parse(&self.index.crate_url(krate_name))
+            .with_context(|| format!("failed to build index URL for {name}"))?;
+        let body = self.get_with_backoff(url).await?;
+        IndexKrate::from_slice(&body)
+            .with_context(|| format!("failed to parse index entry for {name}"))
+    }
+
+    async fn get_with_backoff(&self, url: Url) -> Result<Vec<u8>> {
         let mut attempt = 0;
         loop {
             let response = self.http.get(url.clone()).send().await;
@@ -69,7 +120,7 @@ impl RegistryClient {
                 }
                 Ok(resp) => {
                     let status_resp = resp.error_for_status()?;
-                    return Ok(status_resp.json::<T>().await?);
+                    return Ok(status_resp.bytes().await?.to_vec());
                 }
                 Err(err) => (err.into(), None),
             };
@@ -80,7 +131,9 @@ impl RegistryClient {
             }
             let Some(backoff) = backoff_delay(attempt, retry_after, &url) else {
                 return Err(retry_err).with_context(|| {
-                    format!("{url} asked to back off longer than the {BACKOFF_MAX:?} cap; giving up")
+                    format!(
+                        "{url} asked to back off longer than the {BACKOFF_MAX:?} cap; giving up"
+                    )
                 });
             };
             log::warn!(
@@ -90,24 +143,29 @@ impl RegistryClient {
             sleep(backoff).await;
         }
     }
+}
 
-    pub async fn fetch_version(&self, name: &str, version: &str) -> Result<VersionMeta> {
-        let url = self
-            .base
-            .join(&format!("crates/{name}/{version}"))
-            .with_context(|| format!("failed to build version URL for {name}:{version}"))?;
-        let resp: VersionResponse = self.get_json(url).await?;
-        Ok(resp.version)
-    }
-
-    pub async fn list_versions(&self, name: &str) -> Result<Vec<VersionMeta>> {
-        let url = self
-            .base
-            .join(&format!("crates/{name}"))
-            .with_context(|| format!("failed to build crate URL for {name}"))?;
-        let resp: CrateResponse = self.get_json(url).await?;
-        Ok(resp.versions)
-    }
+fn version_meta(indexed: &IndexVersion) -> Result<VersionMeta> {
+    let Some(pubtime) = &indexed.pubtime else {
+        bail!(
+            "index entry for {}@{} has no publish time",
+            indexed.name,
+            indexed.version
+        );
+    };
+    let created_at = DateTime::parse_from_rfc3339(pubtime)
+        .with_context(|| {
+            format!(
+                "invalid publish time {pubtime:?} for {}@{}",
+                indexed.name, indexed.version
+            )
+        })?
+        .with_timezone(&Utc);
+    Ok(VersionMeta {
+        created_at,
+        yanked: indexed.yanked,
+        num: indexed.version.to_string(),
+    })
 }
 
 fn is_transient_status(status: StatusCode) -> bool {
@@ -157,7 +215,38 @@ fn jitter(url: &Url, attempt: u32) -> Duration {
 
 #[cfg(test)]
 mod tests {
+    use chrono::TimeZone;
+
     use super::*;
+
+    fn indexed_version(pubtime: Option<&str>) -> IndexVersion {
+        let mut indexed = IndexVersion::fake("serde", "1.0.0");
+        indexed.pubtime = pubtime.map(Into::into);
+        indexed
+    }
+
+    #[test]
+    fn version_meta_parses_pubtime() {
+        let meta = version_meta(&indexed_version(Some("2026-06-25T20:43:34Z"))).unwrap();
+        assert_eq!(
+            meta.created_at,
+            Utc.with_ymd_and_hms(2026, 6, 25, 20, 43, 34).unwrap()
+        );
+        assert_eq!(meta.num, "1.0.0");
+        assert!(!meta.yanked);
+    }
+
+    #[test]
+    fn version_meta_errors_without_pubtime() {
+        let err = version_meta(&indexed_version(None)).unwrap_err();
+        assert!(format!("{err:#}").contains("no publish time"));
+    }
+
+    #[test]
+    fn version_meta_errors_on_invalid_pubtime() {
+        let err = version_meta(&indexed_version(Some("yesterday"))).unwrap_err();
+        assert!(format!("{err:#}").contains("invalid publish time"));
+    }
 
     #[test]
     fn retry_after_parses_delta_seconds() {
@@ -192,7 +281,9 @@ mod tests {
     #[test]
     fn backoff_honors_retry_after_within_cap() {
         let url = Url::parse("https://crates.io/api/v1/crates/serde/1.0.0").unwrap();
-        let with = |secs| backoff_delay(1, Some(Duration::from_secs(secs)), &url).map(|d| d - jitter(&url, 1));
+        let with = |secs| {
+            backoff_delay(1, Some(Duration::from_secs(secs)), &url).map(|d| d - jitter(&url, 1))
+        };
         assert_eq!(with(30), Some(Duration::from_secs(30)));
         // Exactly at the cap is still honored.
         assert_eq!(with(BACKOFF_MAX.as_secs()), Some(BACKOFF_MAX));
@@ -201,6 +292,9 @@ mod tests {
     #[test]
     fn backoff_gives_up_when_retry_after_exceeds_cap() {
         let url = Url::parse("https://crates.io/api/v1/crates/serde/1.0.0").unwrap();
-        assert_eq!(backoff_delay(1, Some(Duration::from_secs(6000)), &url), None);
+        assert_eq!(
+            backoff_delay(1, Some(Duration::from_secs(6000)), &url),
+            None
+        );
     }
 }

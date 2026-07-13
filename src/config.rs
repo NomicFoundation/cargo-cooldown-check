@@ -14,7 +14,6 @@ pub struct Config {
     pub cache_dir: Option<PathBuf>,
     pub cache_ttl_seconds: u64,
     pub http_retries: u32,
-    pub registry_api: String,
     pub allowed_registries: Vec<String>,
 }
 
@@ -70,7 +69,6 @@ impl Default for Config {
             allowed_registries: default_allowed_registries(),
             cache_dir: None,
             http_retries: 5,
-            registry_api: "https://crates.io/api/v1/".to_string(),
         }
     }
 }

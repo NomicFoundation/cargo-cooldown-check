@@ -13,9 +13,9 @@ use crate::{
     workspace::Workspace,
 };
 
-// crates.io serves the data-access API at ~1 req/s; two in-flight requests keep
-// that pipe full while overlapping request latency.
-const MAX_CONCURRENT_FETCHES: usize = 2;
+// Remote fetches go to the sparse-index CDN, which is built for cargo's bulk
+// fetching; most lookups are served from cargo's local index cache anyway.
+const MAX_CONCURRENT_FETCHES: usize = 8;
 
 pub async fn run_check_flow(workspace: Workspace) -> Result<()> {
     ensure_lockfile(&workspace)?;

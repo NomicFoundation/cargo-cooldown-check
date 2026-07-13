@@ -13,7 +13,11 @@ use crate::{
 
 pub struct Resolver {
     client: RegistryClient,
-    cache: Cache,
+    /// Version metadata: publish times are immutable, so entries never expire.
+    meta_cache: Cache,
+    /// Version lists carry mutable `yanked` flags, so entries honor the
+    /// configured TTL.
+    list_cache: Cache,
     /// A single reference point in time for all cooldown comparisons,
     /// ensuring consistency across the entire check.
     reference_time: DateTime<Utc>,
@@ -21,15 +25,20 @@ pub struct Resolver {
 
 impl Resolver {
     pub fn new(config: &Config) -> anyhow::Result<Self> {
-        let cache = if let Some(ref root) = config.cache_dir {
-            Cache::with_root(root.clone(), Duration::from_secs(config.cache_ttl_seconds))?
+        let list_ttl = Duration::from_secs(config.cache_ttl_seconds);
+        let (meta_cache, list_cache) = if let Some(ref root) = config.cache_dir {
+            (
+                Cache::with_root(root.clone(), Duration::MAX)?,
+                Cache::with_root(root.clone(), list_ttl)?,
+            )
         } else {
-            Cache::new(Duration::from_secs(config.cache_ttl_seconds))?
+            (Cache::new(Duration::MAX)?, Cache::new(list_ttl)?)
         };
         let client = RegistryClient::new(config)?;
         Ok(Self {
             client,
-            cache,
+            meta_cache,
+            list_cache,
             reference_time: Utc::now(),
         })
     }
@@ -64,22 +73,22 @@ impl Resolver {
 
     pub async fn fetch_version_age(&self, name: &str, version: &str) -> anyhow::Result<u64> {
         let key = format!("{name}/{version}");
-        if let Some(meta) = self.cache.get::<VersionMeta>(&key)? {
+        if let Some(meta) = self.meta_cache.get::<VersionMeta>(&key)? {
             return Ok(self.age_minutes(&meta));
         }
         let meta = self.client.fetch_version(name, version).await?;
-        self.cache.put(&key, &meta)?;
+        self.meta_cache.put(&key, &meta)?;
         Ok(self.age_minutes(&meta))
     }
 
     async fn fetch_version_list(&self, name: &str) -> anyhow::Result<Vec<VersionMeta>> {
         let key = format!("{name}/_list");
-        if let Some(list) = self.cache.get::<Vec<VersionMeta>>(&key)? {
+        if let Some(list) = self.list_cache.get::<Vec<VersionMeta>>(&key)? {
             return Ok(list);
         }
         let mut versions = self.client.list_versions(name).await?;
         versions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        self.cache.put(&key, &versions)?;
+        self.list_cache.put(&key, &versions)?;
         Ok(versions)
     }
 
@@ -161,7 +170,7 @@ mod tests {
         };
         let resolver = Resolver::new(&config).unwrap();
         resolver
-            .cache
+            .list_cache
             .put("tokio/_list", &tokio_versions())
             .unwrap();
         (resolver, dir)
@@ -184,7 +193,7 @@ mod tests {
             created_at,
             yanked: false,
         };
-        resolver.cache.put("tokio/1.43.0", &meta).unwrap();
+        resolver.meta_cache.put("tokio/1.43.0", &meta).unwrap();
 
         let age = resolver.fetch_version_age("tokio", "1.43.0").await.unwrap();
 
@@ -235,7 +244,7 @@ mod tests {
                 yanked: false,
             },
         ];
-        resolver.cache.put("tokio/_list", &versions).unwrap();
+        resolver.list_cache.put("tokio/_list", &versions).unwrap();
 
         let requirements = vec![VersionReq::parse("^1.43").unwrap()];
         let candidates = resolver
@@ -274,7 +283,7 @@ mod tests {
                 yanked: false,
             },
         ];
-        resolver.cache.put("tokio/_list", &versions).unwrap();
+        resolver.list_cache.put("tokio/_list", &versions).unwrap();
 
         let failure = CooldownFailure {
             package_id: PackageId {
