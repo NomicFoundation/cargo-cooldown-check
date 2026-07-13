@@ -13,7 +13,8 @@ use crate::config::Config;
 
 /// Base delay for exponential backoff when the server gives no `Retry-After`.
 const BACKOFF_BASE: Duration = Duration::from_millis(500);
-/// Upper bound on any single backoff, including a server-supplied `Retry-After`.
+/// Cap on the exponential backoff, and the threshold beyond which a server
+/// `Retry-After` is treated as "give up" rather than retried.
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -77,7 +78,11 @@ impl RegistryClient {
             if attempt > self.retries {
                 return Err(retry_err);
             }
-            let backoff = backoff_delay(attempt, retry_after, &url);
+            let Some(backoff) = backoff_delay(attempt, retry_after, &url) else {
+                return Err(retry_err).with_context(|| {
+                    format!("{url} asked to back off longer than the {BACKOFF_MAX:?} cap; giving up")
+                });
+            };
             log::warn!(
                 "Retrying {url} in {backoff:?} (attempt {attempt}/{})",
                 self.retries
@@ -122,13 +127,21 @@ fn retry_after_delay(headers: &HeaderMap) -> Option<Duration> {
     Some(Duration::from_secs(secs))
 }
 
-/// Delay before the next retry: the server's `Retry-After` when present, else
-/// exponential backoff. A per-URL jitter desynchronizes the concurrent fetchers
-/// so a burst that all gets rate-limited doesn't retry into the same window.
-fn backoff_delay(attempt: u32, retry_after: Option<Duration>, url: &Url) -> Duration {
-    let base = retry_after
-        .unwrap_or_else(|| BACKOFF_BASE.saturating_mul(2u32.saturating_pow(attempt - 1)));
-    base.min(BACKOFF_MAX) + jitter(url, attempt)
+/// Delay before the next retry, or `None` to give up. With no `Retry-After` we
+/// use an exponential step capped at [`BACKOFF_MAX`]; with one we honor it
+/// verbatim — unless it exceeds the cap, in which case retrying sooner can't
+/// help and would just hammer a window the server told us to stay out of.
+/// A per-URL jitter desynchronizes the concurrent fetchers so a burst that all
+/// gets rate-limited doesn't retry into the same window.
+fn backoff_delay(attempt: u32, retry_after: Option<Duration>, url: &Url) -> Option<Duration> {
+    let base = match retry_after {
+        Some(delay) if delay > BACKOFF_MAX => return None,
+        Some(delay) => delay,
+        None => BACKOFF_BASE
+            .saturating_mul(2u32.saturating_pow(attempt - 1))
+            .min(BACKOFF_MAX),
+    };
+    Some(base + jitter(url, attempt))
 }
 
 /// Deterministic 0-250ms jitter keyed on the URL, so concurrent retriers (each
@@ -166,19 +179,28 @@ mod tests {
     }
 
     #[test]
-    fn backoff_grows_exponentially_without_retry_after() {
+    fn backoff_grows_exponentially_and_caps_without_retry_after() {
         let url = Url::parse("https://crates.io/api/v1/crates/serde/1.0.0").unwrap();
-        let base = |attempt| backoff_delay(attempt, None, &url) - jitter(&url, attempt);
+        let base = |attempt| backoff_delay(attempt, None, &url).unwrap() - jitter(&url, attempt);
         assert_eq!(base(1), BACKOFF_BASE);
         assert_eq!(base(2), BACKOFF_BASE * 2);
         assert_eq!(base(3), BACKOFF_BASE * 4);
+        // 2^9 * 500ms = 256s, clamped to the cap.
+        assert_eq!(base(10), BACKOFF_MAX);
     }
 
     #[test]
-    fn backoff_honors_and_caps_retry_after() {
+    fn backoff_honors_retry_after_within_cap() {
         let url = Url::parse("https://crates.io/api/v1/crates/serde/1.0.0").unwrap();
-        let with = |secs| backoff_delay(1, Some(Duration::from_secs(secs)), &url) - jitter(&url, 1);
-        assert_eq!(with(30), Duration::from_secs(30));
-        assert_eq!(with(600), BACKOFF_MAX);
+        let with = |secs| backoff_delay(1, Some(Duration::from_secs(secs)), &url).map(|d| d - jitter(&url, 1));
+        assert_eq!(with(30), Some(Duration::from_secs(30)));
+        // Exactly at the cap is still honored.
+        assert_eq!(with(BACKOFF_MAX.as_secs()), Some(BACKOFF_MAX));
+    }
+
+    #[test]
+    fn backoff_gives_up_when_retry_after_exceeds_cap() {
+        let url = Url::parse("https://crates.io/api/v1/crates/serde/1.0.0").unwrap();
+        assert_eq!(backoff_delay(1, Some(Duration::from_secs(6000)), &url), None);
     }
 }
