@@ -1,44 +1,23 @@
-use std::time::Duration;
-
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use semver::{Version, VersionReq};
 
 use crate::{
-    cache::Cache,
-    config::Config,
     registry::{RegistryClient, VersionMeta},
     types::CooldownFailure,
 };
 
 pub struct Resolver {
     client: RegistryClient,
-    /// Version metadata: publish times are immutable, so entries never expire.
-    meta_cache: Cache,
-    /// Version lists carry mutable `yanked` flags, so entries honor the
-    /// configured TTL.
-    list_cache: Cache,
     /// A single reference point in time for all cooldown comparisons,
     /// ensuring consistency across the entire check.
     reference_time: DateTime<Utc>,
 }
 
 impl Resolver {
-    pub fn new(config: &Config) -> anyhow::Result<Self> {
-        let list_ttl = Duration::from_secs(config.cache_ttl_seconds);
-        let (meta_cache, list_cache) = if let Some(ref root) = config.cache_dir {
-            (
-                Cache::with_root(root.clone(), Duration::MAX)?,
-                Cache::with_root(root.clone(), list_ttl)?,
-            )
-        } else {
-            (Cache::new(Duration::MAX)?, Cache::new(list_ttl)?)
-        };
-        let client = RegistryClient::new(config)?;
+    pub fn new() -> anyhow::Result<Self> {
         Ok(Self {
-            client,
-            meta_cache,
-            list_cache,
+            client: RegistryClient::new()?,
             reference_time: Utc::now(),
         })
     }
@@ -53,51 +32,44 @@ impl Resolver {
                 "Could not parse {}@{} version",
                 cooldown_failure.name, cooldown_failure.current_version
             ))?;
-        let candidate_list = self.fetch_version_list(&cooldown_failure.name).await?;
+        let mut candidate_list = self.client.list_versions(&cooldown_failure.name).await?;
+        candidate_list.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         let cutoff = self.reference_time
             - chrono::Duration::minutes(cooldown_failure.age_threshold_minutes as i64);
 
-        let versions = candidate_list
-            .into_iter()
-            .filter(|meta| !meta.yanked)
-            .filter(|meta| meta.created_at <= cutoff)
-            // Silently skip unparseable versions - at worst we omit a candidate from the downgrade suggestions.
-            .filter_map(|meta| Version::parse(&meta.num).ok())
-            .filter(|version| {
-                *version < current_version && satisfies_requirements(version, requirements)
-            })
-            .collect::<Vec<_>>();
-
-        Ok(versions)
+        Ok(candidate_versions(
+            candidate_list,
+            &current_version,
+            cutoff,
+            requirements,
+        ))
     }
 
     pub async fn fetch_version_age(&self, name: &str, version: &str) -> anyhow::Result<u64> {
-        let key = format!("{name}/{version}");
-        if let Some(meta) = self.meta_cache.get::<VersionMeta>(&key)? {
-            return Ok(self.age_minutes(&meta));
-        }
         let meta = self.client.fetch_version(name, version).await?;
-        self.meta_cache.put(&key, &meta)?;
-        Ok(self.age_minutes(&meta))
-    }
-
-    async fn fetch_version_list(&self, name: &str) -> anyhow::Result<Vec<VersionMeta>> {
-        let key = format!("{name}/_list");
-        if let Some(list) = self.list_cache.get::<Vec<VersionMeta>>(&key)? {
-            return Ok(list);
-        }
-        let mut versions = self.client.list_versions(name).await?;
-        versions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        self.list_cache.put(&key, &versions)?;
-        Ok(versions)
-    }
-
-    fn age_minutes(&self, meta: &VersionMeta) -> u64 {
-        (self.reference_time - meta.created_at)
+        Ok((self.reference_time - meta.created_at)
             .num_minutes()
             .try_into()
-            .unwrap_or(0)
+            .unwrap_or(0))
     }
+}
+
+fn candidate_versions(
+    candidate_list: Vec<VersionMeta>,
+    current_version: &Version,
+    cutoff: DateTime<Utc>,
+    requirements: &[VersionReq],
+) -> Vec<Version> {
+    candidate_list
+        .into_iter()
+        .filter(|meta| !meta.yanked)
+        .filter(|meta| meta.created_at <= cutoff)
+        // Silently skip unparseable versions - at worst we omit a candidate from the downgrade suggestions.
+        .filter_map(|meta| Version::parse(&meta.num).ok())
+        .filter(|version| {
+            *version < *current_version && satisfies_requirements(version, requirements)
+        })
+        .collect()
 }
 
 fn satisfies_requirements(version: &Version, requirements: &[VersionReq]) -> bool {
@@ -109,209 +81,102 @@ fn satisfies_requirements(version: &Version, requirements: &[VersionReq]) -> boo
 
 #[cfg(test)]
 mod tests {
-    use cargo_metadata::PackageId;
     use chrono::TimeZone;
-    use tempfile::tempdir;
 
     use super::*;
 
-    fn tokio_versions() -> Vec<VersionMeta> {
-        let old = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
-        vec![
-            VersionMeta {
-                num: "1.44.0".into(),
-                created_at: old,
-                yanked: false,
-            },
-            VersionMeta {
-                num: "1.43.4".into(),
-                created_at: old,
-                yanked: false,
-            },
-            VersionMeta {
-                num: "1.43.3".into(),
-                created_at: old,
-                yanked: false,
-            },
-            VersionMeta {
-                num: "1.43.0".into(),
-                created_at: old,
-                yanked: false,
-            },
-            VersionMeta {
-                num: "1.42.1".into(),
-                created_at: old,
-                yanked: false,
-            },
-            VersionMeta {
-                num: "1.41.0".into(),
-                created_at: old,
-                yanked: false,
-            },
-        ]
-    }
-
-    fn tokio_failure() -> CooldownFailure {
-        CooldownFailure {
-            package_id: PackageId {
-                repr: "tokio 1.43.4".to_string(),
-            },
-            name: "tokio".to_string(),
-            current_version: "1.43.4".to_string(),
-            age_threshold_minutes: 0,
+    fn version_meta(num: &str, created_at: DateTime<Utc>, yanked: bool) -> VersionMeta {
+        VersionMeta {
+            num: num.into(),
+            created_at,
+            yanked,
         }
     }
 
-    fn resolver_with_cached_tokio_versions() -> (Resolver, tempfile::TempDir) {
-        let dir = tempdir().unwrap();
-        let config = Config {
-            cache_dir: Some(dir.path().to_path_buf()),
-            ..Config::default()
-        };
-        let resolver = Resolver::new(&config).unwrap();
-        resolver
-            .list_cache
-            .put("tokio/_list", &tokio_versions())
-            .unwrap();
-        (resolver, dir)
+    fn tokio_versions() -> Vec<VersionMeta> {
+        let old = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        ["1.44.0", "1.43.4", "1.43.3", "1.43.0", "1.42.1", "1.41.0"]
+            .map(|num| version_meta(num, old, false))
+            .into_iter()
+            .collect()
     }
 
-    #[tokio::test]
-    async fn fetch_version_age_returns_age_from_cached_meta() {
-        let dir = tempdir().unwrap();
-        let config = Config {
-            cache_dir: Some(dir.path().to_path_buf()),
-            ..Config::default()
-        };
-
-        let resolver = Resolver::new(&config).unwrap();
-        let expected_age = 10_080u64; // 7 days
-        let created_at =
-            resolver.reference_time - chrono::Duration::minutes(expected_age.try_into().unwrap());
-        let meta = VersionMeta {
-            num: "1.43.0".into(),
-            created_at,
-            yanked: false,
-        };
-        resolver.meta_cache.put("tokio/1.43.0", &meta).unwrap();
-
-        let age = resolver.fetch_version_age("tokio", "1.43.0").await.unwrap();
-
-        assert_eq!(age, expected_age);
+    fn current_version() -> Version {
+        Version::parse("1.43.4").unwrap()
     }
 
-    #[tokio::test]
-    async fn find_version_candidates_returns_versions_satisfying_all_requirements() {
-        let (resolver, _dir) = resolver_with_cached_tokio_versions();
+    fn far_future_cutoff() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2099, 1, 1, 0, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn candidate_versions_returns_versions_satisfying_all_requirements() {
         let requirements = vec![
             VersionReq::parse("^1").unwrap(),
             VersionReq::parse("^1.42").unwrap(),
             VersionReq::parse("^1.43").unwrap(),
         ];
 
-        let candidates = resolver
-            .find_version_candidates(&tokio_failure(), &requirements)
-            .await
-            .unwrap();
+        let candidates = candidate_versions(
+            tokio_versions(),
+            &current_version(),
+            far_future_cutoff(),
+            &requirements,
+        );
 
         let versions: Vec<String> = candidates.iter().map(ToString::to_string).collect();
         assert_eq!(versions, vec!["1.43.3", "1.43.0"]);
     }
 
-    #[tokio::test]
-    async fn find_version_candidates_excludes_yanked_versions() {
-        let dir = tempdir().unwrap();
-        let config = Config {
-            cache_dir: Some(dir.path().to_path_buf()),
-            ..Config::default()
-        };
-        let resolver = Resolver::new(&config).unwrap();
+    #[test]
+    fn candidate_versions_excludes_yanked_versions() {
         let old = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let versions = vec![
-            VersionMeta {
-                num: "1.43.4".into(),
-                created_at: old,
-                yanked: false,
-            },
-            VersionMeta {
-                num: "1.43.3".into(),
-                created_at: old,
-                yanked: true,
-            },
-            VersionMeta {
-                num: "1.43.0".into(),
-                created_at: old,
-                yanked: false,
-            },
+            version_meta("1.43.4", old, false),
+            version_meta("1.43.3", old, true),
+            version_meta("1.43.0", old, false),
         ];
-        resolver.list_cache.put("tokio/_list", &versions).unwrap();
-
         let requirements = vec![VersionReq::parse("^1.43").unwrap()];
-        let candidates = resolver
-            .find_version_candidates(&tokio_failure(), &requirements)
-            .await
-            .unwrap();
+
+        let candidates = candidate_versions(
+            versions,
+            &current_version(),
+            far_future_cutoff(),
+            &requirements,
+        );
 
         let versions: Vec<String> = candidates.iter().map(ToString::to_string).collect();
         assert_eq!(versions, vec!["1.43.0"]);
     }
 
-    #[tokio::test]
-    async fn find_version_candidates_excludes_versions_within_cooldown_period() {
-        let dir = tempdir().unwrap();
-        let config = Config {
-            cache_dir: Some(dir.path().to_path_buf()),
-            ..Config::default()
-        };
-        let resolver = Resolver::new(&config).unwrap();
+    #[test]
+    fn candidate_versions_excludes_versions_within_cooldown_period() {
         let old = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let fresh = Utc::now();
         let versions = vec![
-            VersionMeta {
-                num: "1.43.4".into(),
-                created_at: fresh,
-                yanked: false,
-            },
-            VersionMeta {
-                num: "1.43.3".into(),
-                created_at: fresh,
-                yanked: false,
-            },
-            VersionMeta {
-                num: "1.43.0".into(),
-                created_at: old,
-                yanked: false,
-            },
+            version_meta("1.43.4", fresh, false),
+            version_meta("1.43.3", fresh, false),
+            version_meta("1.43.0", old, false),
         ];
-        resolver.list_cache.put("tokio/_list", &versions).unwrap();
-
-        let failure = CooldownFailure {
-            package_id: PackageId {
-                repr: "tokio 1.43.4".to_string(),
-            },
-            name: "tokio".to_string(),
-            current_version: "1.43.4".to_string(),
-            age_threshold_minutes: 10080,
-        };
+        let cutoff = Utc::now() - chrono::Duration::minutes(10080);
         let requirements = vec![VersionReq::parse("^1.43").unwrap()];
-        let candidates = resolver
-            .find_version_candidates(&failure, &requirements)
-            .await
-            .unwrap();
+
+        let candidates = candidate_versions(versions, &current_version(), cutoff, &requirements);
 
         let versions: Vec<String> = candidates.iter().map(ToString::to_string).collect();
         assert_eq!(versions, vec!["1.43.0"]);
     }
 
-    #[tokio::test]
-    async fn find_version_candidates_returns_empty_when_no_older_version_satisfies_requirements() {
-        let (resolver, _dir) = resolver_with_cached_tokio_versions();
+    #[test]
+    fn candidate_versions_returns_empty_when_no_older_version_satisfies_requirements() {
         let requirements = vec![VersionReq::parse("^1.43.4").unwrap()];
 
-        let candidates = resolver
-            .find_version_candidates(&tokio_failure(), &requirements)
-            .await
-            .unwrap();
+        let candidates = candidate_versions(
+            tokio_versions(),
+            &current_version(),
+            far_future_cutoff(),
+            &requirements,
+        );
 
         assert!(
             candidates.is_empty(),

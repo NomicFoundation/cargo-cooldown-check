@@ -32,7 +32,7 @@ pub async fn run_check_flow(workspace: Workspace) -> Result<()> {
         return Ok(());
     }
 
-    let resolver = &Resolver::new(config)?;
+    let resolver = &Resolver::new()?;
 
     // Filter packages that need an age check.
     let dependencies_to_validate = workspace.nodes.iter().filter_map(|node| {

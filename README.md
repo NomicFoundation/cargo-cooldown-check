@@ -77,11 +77,9 @@ Workspace configuration is defined in `<workspace_root>/.cargo/cooldown.toml`:
 
 ```toml
 cooldown_minutes = 10080  # 7 days
-# cache_dir = "/tmp/cooldown-cache"  # optional
-# cache_ttl_seconds = 86400           # optional, defaults to 1 day; applies to
-                                       # version lists (mutable `yanked` flags) —
-                                       # publish times are immutable and cached forever
 ```
+
+(The retired `cache_dir` / `cache_ttl_seconds` keys are ignored: the tool reads cargo's own registry index cache and keeps no state of its own.)
 
 Allowlist rules can lower the effective cooldown per crate or permit an explicit version via `<workspace_root>/.cargo/cooldown-allowlist.toml`:
 
@@ -119,7 +117,7 @@ Candidate versions will:
 ### Technical details
 
 - The tool invokes `cargo metadata` to read the full dependency graph and records every `VersionReq` that parents impose on their children.
-- For each crate sourced from a watched registry, it reads the publish time (`pubtime`) from the crates.io sparse index and computes the package age. Lookups go through a small on-disk cache, then cargo's own local index cache (already populated by the `cargo metadata` call), and only fall back to fetching from `index.crates.io` — the CDN host built for cargo's bulk fetching, which unlike the `crates.io/api` host imposes no request-rate budget.
+- For each crate sourced from a watched registry, it reads the publish time (`pubtime`) from the crates.io sparse index and computes the package age. Lookups read cargo's own local index cache (already populated by the `cargo metadata` call), and only fall back to fetching from `index.crates.io` — the CDN host built for cargo's bulk fetching, which unlike the `crates.io/api` host imposes no request-rate budget. Steady state performs no network I/O at all.
 
 ## Limitations
 
