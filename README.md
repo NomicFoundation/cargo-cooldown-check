@@ -118,10 +118,13 @@ Candidate versions will:
 
 - The tool invokes `cargo metadata` to read the full dependency graph and records every `VersionReq` that parents impose on their children.
 - For each crate sourced from a watched registry, it reads the publish time (`pubtime`) from the crates.io sparse index and computes the package age. Lookups read cargo's own local index cache (already populated by the `cargo metadata` call), and only fall back to fetching from `index.crates.io` — the CDN host built for cargo's bulk fetching, which unlike the `crates.io/api` host imposes no request-rate budget. Steady state performs no network I/O at all.
+- Remote index fetches retry transient failures (HTTP 429/5xx, network errors) up to 3 times, mirroring cargo's own `net.retry` default.
 
 ## Limitations
 
 - Only dependencies sourced from the crates.io registry are checked. Packages from other registries, git sources, or local paths are silently skipped.
+- Yanked flags for downgrade candidates come from cargo's local index cache and can be stale: a version yanked after cargo last refreshed the index may still be suggested. The suggested `cargo update --precise` command then fails loudly.
+- Index entries without a publish time are silently omitted from downgrade candidates; a local index file that predates crates.io's `pubtime` backfill triggers a one-time remote refetch of that crate.
 - Configuration file paths are not configurable (`cooldown.toml` and `cooldown-allowlist.toml`).
 - Configuration is only possible through files; environment variables are not supported.
 
