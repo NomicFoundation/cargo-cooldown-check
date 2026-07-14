@@ -36,7 +36,7 @@ cargo install --git https://github.com/NomicFoundation/cargo-cooldown-check
 Add the following step to your workflow:
 
 ```yaml
-- uses: NomicFoundation/cargo-cooldown-check@v0.1.2  # or pin to a commit SHA
+- uses: NomicFoundation/cargo-cooldown-check@v0.2.0  # or pin to a commit SHA
   # with:
   #   verbose: "true"  # optional
 ```
