@@ -1,0 +1,62 @@
+# TEMPORARY — one-shot repair of the stale hermit `index` release after
+# the v0.2.0 publish run failed its index-update step (no repo context
+# for `gh release` in the checkout-less publish job). Verbatim copy of
+# that step, including the GH_REPO fix, so a green run also proves the
+# fix under the publish job's exact conditions. Revert before merge.
+name: "Temp: refresh hermit index"
+
+on:
+  push:
+    branches: ["fix-hermit-index-context"]
+
+permissions: {}
+
+jobs:
+  update-index:
+    runs-on: "ubuntu-24.04"
+    permissions:
+      contents: "write"
+    steps:
+      - name: "Update hermit search index"
+        env:
+          GH_TOKEN: "${{ github.token }}"
+          # No checkout in this job: `gh release` needs the repo spelled
+          # out or it tries to resolve it from a git remote and dies.
+          GH_REPO: "${{ github.repository }}"
+        run: |
+          # Regenerate the hermit search index so Renovate (and other
+          # consumers using this repo as a custom hermit source) can
+          # discover available versions.
+          versions=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq '[.[] | select(.prerelease | not) | select(.draft | not) | .tag_name | select(startswith("v")) | ltrimstr("v")] | sort_by(split(".") | map(tonumber))')
+
+          # Format must match `hermit search --json` output (same schema
+          # as cashapp/hermit-packages index release).
+          current=$(echo "$versions" | jq -r '.[-1]')
+
+          jq -n \
+            --argjson versions "$versions" \
+            --arg current "$current" \
+            '[{
+              Name: "cargo-cooldown-check",
+              Versions: $versions,
+              Channels: ["@latest"],
+              CurrentVersion: $current,
+              Description: "Checks that all Cargo dependencies have been published for a minimum cooldown period",
+              Repository: "https://github.com/NomicFoundation/cargo-cooldown-check"
+            }]' > index.json
+
+          echo "Generated index.json:"
+          cat index.json
+
+          # Create the index release if it doesn't exist yet, then
+          # replace the asset in-place to avoid a window where the
+          # release is missing.
+          if ! gh release view index > /dev/null 2>&1; then
+            gh release create index \
+              --title "Hermit Package Index" \
+              --notes "Auto-generated hermit search index for Renovate. Do not delete." \
+              --latest=false
+          fi
+
+          gh release upload index index.json --clobber
