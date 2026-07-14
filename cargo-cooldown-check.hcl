@@ -2,7 +2,7 @@ description = "Checks that all Cargo dependencies have been published for a mini
 binaries = ["cargo-cooldown-check"]
 test = "cargo-cooldown-check --help"
 
-version "0.1.2" {
+version "0.1.2" "0.2.0" {
   auto-version {
     github-release = "NomicFoundation/cargo-cooldown-check"
   }
