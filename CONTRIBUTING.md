@@ -20,12 +20,18 @@ The binary and the GitHub Action share a single version in `Cargo.toml`. Bumping
 
 1. Bump the version in `Cargo.toml`.
 2. Run `cargo check` so `Cargo.lock` picks up the new version.
-3. Open a PR with the version bump.
-4. Merge the PR to `main`.
+3. Add the new version to the `version` block in `cargo-cooldown-check.hcl` — hermit resolves versions from the manifest on `main`, not from the release list, so consumers cannot pin the new version without this.
+4. Update the pinned version in the README's GitHub Actions usage example.
+5. Open a PR with the version bump.
+6. Merge the PR to `main`.
+
+Steps 2–4 are CI-enforced: `--locked` catches a stale `Cargo.lock`, and `tests/release_sync.rs` fails until the hermit manifest and README carry the new version.
 
 The workflow automatically creates a git tag and GitHub release with platform tarballs. If the version in `Cargo.toml` matches an existing tag, the publish job is skipped.
 
 Each publish also regenerates the `index` release (a hermit search index consumed by Renovate — see the Hermit / Renovate section in the README). Do not delete this release; it is reused across versions and updated in place.
+
+After a release, downstream consumers pick up the new version via Renovate, or by hand: edr and solx pin the GitHub Action by commit SHA; slang pins the hermit package in its `bin/`.
 
 ### Dry-run a release
 
