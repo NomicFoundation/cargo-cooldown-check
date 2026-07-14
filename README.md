@@ -36,7 +36,7 @@ cargo install --git https://github.com/NomicFoundation/cargo-cooldown-check
 Add the following step to your workflow:
 
 ```yaml
-- uses: NomicFoundation/cargo-cooldown-check@v0.1.2  # or pin to a commit SHA
+- uses: NomicFoundation/cargo-cooldown-check@v0.2.0  # or pin to a commit SHA
   # with:
   #   verbose: "true"  # optional
 ```
@@ -77,9 +77,9 @@ Workspace configuration is defined in `<workspace_root>/.cargo/cooldown.toml`:
 
 ```toml
 cooldown_minutes = 10080  # 7 days
-# cache_dir = "/tmp/cooldown-cache"  # optional
-# cache_ttl_seconds = 86400           # optional, defaults to 1 day
 ```
+
+(The retired `cache_dir` / `cache_ttl_seconds` keys are ignored: the tool reads cargo's own registry index cache and keeps no state of its own.)
 
 Allowlist rules can lower the effective cooldown per crate or permit an explicit version via `<workspace_root>/.cargo/cooldown-allowlist.toml`:
 
@@ -117,11 +117,14 @@ Candidate versions will:
 ### Technical details
 
 - The tool invokes `cargo metadata` to read the full dependency graph and records every `VersionReq` that parents impose on their children.
-- For each crate sourced from a watched registry, it fetches publication metadata from the crates.io HTTP API through a small on-disk cache and computes the package age.
+- For each crate sourced from a watched registry, it reads the publish time (`pubtime`) from the crates.io sparse index and computes the package age. Lookups read cargo's own local index cache (already populated by the `cargo metadata` call), and only fall back to fetching from `index.crates.io` — the CDN host built for cargo's bulk fetching, which unlike the `crates.io/api` host imposes no request-rate budget. Steady state performs no network I/O at all.
+- Remote index fetches retry transient failures (HTTP 429/5xx, network errors) up to 3 times, mirroring cargo's own `net.retry` default.
 
 ## Limitations
 
 - Only dependencies sourced from the crates.io registry are checked. Packages from other registries, git sources, or local paths are silently skipped.
+- Yanked flags for downgrade candidates come from cargo's local index cache and can be stale: a version yanked after cargo last refreshed the index may still be suggested. The suggested `cargo update --precise` command then fails loudly.
+- Index entries without a publish time are silently omitted from downgrade candidates; a local index file that predates crates.io's `pubtime` backfill triggers a one-time remote refetch of that crate.
 - Configuration file paths are not configurable (`cooldown.toml` and `cooldown-allowlist.toml`).
 - Configuration is only possible through files; environment variables are not supported.
 

@@ -1,6 +1,6 @@
 [package]
 name = "cargo-cooldown-check"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
@@ -10,13 +10,13 @@ clap = { version = "4", features = ["derive"] }
 clap-cargo = { version = "0.18", features = ["cargo_metadata"] }
 log = { version = "0.4.31", default-features = false }
 serde = { version = "1.0", features = ["derive", "std"] }
-serde_json = { version = "1.0", features = ["arbitrary_precision", "preserve_order", "std"] }
 toml = { version = "1.1", features = ["preserve_order"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "rustls-tls"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+reqwest = { version = "0.12", default-features = false, features = ["gzip", "rustls-tls"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 semver = { version = "1.0.28", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["std"] }
+tame-index = { version = "0.26.3", default-features = false }
 
 [dev-dependencies]
 tempfile = "3.27"

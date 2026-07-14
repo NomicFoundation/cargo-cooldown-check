@@ -1,5 +1,4 @@
 mod allowlist;
-mod cache;
 mod config;
 mod executor;
 mod registry;

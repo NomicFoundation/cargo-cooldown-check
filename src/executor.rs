@@ -13,7 +13,9 @@ use crate::{
     workspace::Workspace,
 };
 
-const MAX_CONCURRENT_FETCHES: usize = 10;
+// Remote fetches go to the sparse-index CDN, which is built for cargo's bulk
+// fetching; most lookups are served from cargo's local index cache anyway.
+const MAX_CONCURRENT_FETCHES: usize = 8;
 
 pub async fn run_check_flow(workspace: Workspace) -> Result<()> {
     ensure_lockfile(&workspace)?;
@@ -30,7 +32,7 @@ pub async fn run_check_flow(workspace: Workspace) -> Result<()> {
         return Ok(());
     }
 
-    let resolver = &Resolver::new(config)?;
+    let resolver = &Resolver::new()?;
 
     // Filter packages that need an age check.
     let dependencies_to_validate = workspace.nodes.iter().filter_map(|node| {
