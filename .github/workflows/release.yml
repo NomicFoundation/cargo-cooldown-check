@@ -144,6 +144,9 @@ jobs:
       - name: "Update hermit search index"
         env:
           GH_TOKEN: "${{ github.token }}"
+          # No checkout in this job: `gh release` needs the repo spelled
+          # out or it tries to resolve it from a git remote and dies.
+          GH_REPO: "${{ github.repository }}"
         run: |
           # Regenerate the hermit search index so Renovate (and other
           # consumers using this repo as a custom hermit source) can
