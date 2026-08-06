@@ -1,6 +1,52 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
-  ]
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigestsToSemver"],
+  "timezone": "UTC",
+  "schedule": ["before 9am on Monday"],
+  "minimumReleaseAge": "7 days",
+  "internalChecksFilter": "strict",
+  "stopUpdatingLabel": "renovate:no-rebase",
+  "ignorePaths": ["example/**"],
+  "packageRules": [
+    {
+      "description": "Extra cooldown for majors",
+      "matchUpdateTypes": ["major"],
+      "minimumReleaseAge": "30 days"
+    },
+    {
+      "description": "cargo: keep the window in lockstep with .cargo/cooldown.toml (cooldown_minutes = 10080). CI runs this repo's own cooldown check against Cargo.lock, so a shorter window opens PRs that fail their own gate.",
+      "matchManagers": ["cargo"],
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "cargo: group minor/patch; majors stay individual",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "cargo minor/patch"
+    },
+    {
+      "description": "cargo: ungroup pre-1.0 minors — Cargo treats 0.x→0.y as breaking, so these need their own PR.",
+      "matchManagers": ["cargo"],
+      "matchCurrentVersion": "<1.0.0",
+      "matchUpdateTypes": ["minor"],
+      "groupName": null
+    },
+    {
+      "description": "github-actions: group everything, including majors",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions"
+    },
+    {
+      "description": "node: `node-version` in check-renovate-config.yml only has to stay new enough for renovate@latest — a different decision from an action bump. Keep it out of the actions group so it gets its own PR.",
+      "matchDepNames": ["node"],
+      "groupName": null
+    }
+  ],
+  "labels": ["dependencies"],
+  "configMigration": true,
+  "dependencyDashboard": false,
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "enabled": true
+  }
 }
