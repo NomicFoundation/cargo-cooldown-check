@@ -85,7 +85,11 @@ impl RegistryClient {
 
     fn local_krate(&self, name: &str) -> Option<IndexKrate> {
         let krate_name = KrateName::crates_io(name).ok()?;
-        self.index.cached_krate(krate_name, &self.lock).ok()?
+        self.index
+            .cached_krate(krate_name, &self.lock)
+            .ok()??
+            .deserialize()
+            .ok()
     }
 
     async fn fetch_krate(&self, name: &str) -> Result<IndexKrate> {
