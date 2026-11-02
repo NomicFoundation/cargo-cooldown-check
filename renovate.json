@@ -41,8 +41,9 @@
       "groupName": "github-actions"
     },
     {
-      "description": "node: `node-version` in check-renovate-config.yml only has to stay new enough for renovate@latest — a different decision from an action bump. Keep it out of the actions group so it gets its own PR.",
+      "description": "node: `node-version` in check-renovate-config.yml has to stay within renovate@latest's engines.node range (^24.11 today) — a different decision from an action bump. Keep it out of the actions group so it gets its own PR, and raise the cap once renovate accepts a newer major.",
       "matchDepNames": ["node"],
+      "allowedVersions": "<25",
       "groupName": null
     }
   ],
